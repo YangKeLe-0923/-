@@ -1,0 +1,190 @@
+<html xmlns:v="urn:schemas-microsoft-com:vml"
+xmlns:o="urn:schemas-microsoft-com:office:office"
+xmlns:w="urn:schemas-microsoft-com:office:word"
+xmlns:m="http://schemas.microsoft.com/office/2004/12/omml"
+xmlns="http://www.w3.org/TR/REC-html40">
+
+<head>
+<meta http-equiv=Content-Type content="text/html; charset=utf-8">
+<meta name=ProgId content=Word.Document>
+<style>
+body { font-family: "微软雅黑", "Microsoft YaHei", "SimSun", Arial; font-size: 11pt; line-height: 1.8; color: #333333; }
+h1 { font-size: 18pt; font-weight: bold; font-family: "微软雅黑", "Microsoft YaHei", SimHei; text-align: center;
+     border-bottom: 2.25pt solid #2C3E50; padding-bottom: 6pt; }
+h2 { font-size: 14pt; font-weight: bold; font-family: "微软雅黑", "Microsoft YaHei", SimHei;
+     border-bottom: 1.0pt solid #BDC3C7; padding-bottom: 3pt; margin-top: 20pt; }
+h3 { font-size: 12pt; font-weight: bold; font-family: "微软雅黑", "Microsoft YaHei", SimHei; margin-top: 16pt; }
+code { font-family: Consolas, "Courier New"; background: #f5f5f5; padding: 1px 3px; font-size: 10pt; }
+pre { font-family: Consolas, "Courier New"; background: #f8f8f8; padding: 10pt;
+      border: 1px solid #ddd; font-size: 10pt; white-space: pre-wrap; line-height: 1.5; }
+ul { margin-top: 6pt; margin-bottom: 6pt; }
+li { margin-bottom: 3pt; }
+.tag1 { display: inline-block; background: #E8F4F8; padding: 2px 8px; border-radius: 3px;
+       font-size: 9pt; color: #2C3E50; margin-right: 6pt; }
+</style>
+</head>
+<body>
+
+<h1>ThreadLocal核心知识速览</h1>
+
+<h2>一、什么是ThreadLocal</h2>
+
+<p><span class="tag1">定义</span> <b>ThreadLocal = Thread Local Variable（线程局部变量）</b>，用来创建线程私有的变量，每个线程有自己的独立副本，互不干扰。</p>
+<p>它本质上就是每个员工的<b>"私人储物柜"</b>——每个人有自己的柜子，自己放自己拿，不用和别人抢，也不用担心别人动你的东西。</p>
+<p>打个比方：ThreadLocal就像公司的储物柜</p>
+
+<ul>
+<li>每个员工（线程）有自己独立的储物柜格子</li>
+<li>你把自己的东西（数据）放进去，只有你自己能取到</li>
+<li>别人的柜子里有什么你不知道，你的柜子里有什么别人也不知道</li>
+<li>天然线程安全，不需要加锁</li>
+</ul>
+
+<h2>二、核心方法</h2>
+
+<ul>
+<li><code>set(value)</code> —— 给当前线程设置值</li>
+<li><code>get()</code> —— 获取当前线程存的值，没有返回null</li>
+<li><code>remove()</code> —— 删除当前线程的值（<b>必须调用，防止内存泄漏</b>）</li>
+<li><code>withInitial(supplier)</code> —— 静态方法，设置初始值（JDK8+）</li>
+</ul>
+
+<h3>代码示例：线程隔离</h3>
+
+<pre>
+public class ThreadLocalDemo {
+    // 每个线程有独立副本，初始值0
+    private static ThreadLocal&lt;Integer&gt; count = ThreadLocal.withInitial(() -&gt; 0);
+
+    public static void main(String[] args) {
+        for (int i = 0; i &lt; 3; i++) {
+            new Thread(() -&gt; {
+                int val = count.get() + 1;
+                count.set(val);
+                System.out.println(Thread.currentThread().getName()
+                    + " 的值：" + val);  // 每个线程都是1，互不影响
+                count.remove(); // 用完必须删！
+            }).start();
+        }
+    }
+}
+</pre>
+
+<p>3个线程都对count做+1，但结果每个线程都是1，而不是3——因为每个线程有自己的副本，互不干扰。</p>
+
+<h2>三、实现原理</h2>
+
+<h3>数据存在哪</h3>
+<p>很多人以为数据存在ThreadLocal对象里，其实不是。<b>数据存在Thread对象里</b>。</p>
+<p>每个Thread对象都有一个 <code>threadLocals</code> 变量，类型是 <code>ThreadLocal.ThreadLocalMap</code>。ThreadLocalMap是一个自定义的Map，key是ThreadLocal实例，value是存的值。</p>
+
+<p>结构大概是这样：</p>
+
+<pre>
+Thread thread = ...;
+thread.threadLocals = new ThreadLocalMap();
+// ThreadLocalMap里的Entry：
+// key: ThreadLocal实例（弱引用）
+// value: 真正存的值（强引用）
+</pre>
+
+<h3>get() 方法执行流程</h3>
+
+<ol>
+<li>获取当前线程 Thread.currentThread()</li>
+<li>拿到线程的 threadLocals（ThreadLocalMap）</li>
+<li>以当前 ThreadLocal 对象为 key，从 map 中取值</li>
+<li>返回 value</li>
+</ol>
+
+<p>这就是为什么"ThreadLocal是线程隔离的"——每个线程有自己的Map，各存各的，互不影响。</p>
+
+<h3>弱引用key</h3>
+<p>ThreadLocalMap中的Entry的key（ThreadLocal实例）是<b>弱引用</b>，value是强引用。</p>
+<p>弱引用的特点：GC的时候，如果没有强引用指向它，就会被回收。</p>
+<p>设计原因：ThreadLocal对象用完了，方法执行完了，栈上的引用没了，如果key是强引用，那ThreadLocal对象永远回收不了。用弱引用，ThreadLocal对象就能正常被GC回收。</p>
+
+<h2>四、内存泄漏问题</h2>
+
+<h3>为什么会内存泄漏</h3>
+<p>key是弱引用，GC后key变成null了，但value还是强引用，Thread还活着（线程池场景下线程不会死），ThreadMap也在，value就一直被引用着，回收不了。</p>
+<p>这些key为null的Entry，value永远访问不到，但一直占着内存，时间长了就OOM了。</p>
+
+<p>引用链：Thread → ThreadLocalMap → Entry（key=null, value强引用）→ value对象</p>
+
+<h3>什么场景最严重</h3>
+<p><b>线程池 + ThreadLocal</b>是最容易出问题的组合。</p>
+<p>因为线程池里的线程是复用的，用完了不会销毁，一直活着。如果ThreadLocal用完了不remove，value就一直挂在这个线程的ThreadLocalMap上，线程不死value就不回收。</p>
+
+<h3>怎么解决</h3>
+<p><b>用完一定要调用 remove()</b>！这是最根本的解决方案。</p>
+<p>最佳实践：try里用，finally里remove，保证一定执行到。</p>
+
+<pre>
+try {
+    threadLocal.set(someValue);
+    // 业务逻辑...
+} finally {
+    threadLocal.remove();  // 必须在finally里删
+}
+</pre>
+
+<p>ThreadLocalMap自己也有一些清理机制（set/get/remove的时候会顺便清理一些key为null的Entry），但这不靠谱，不能依赖。</p>
+
+<h2>五、常见应用场景</h2>
+
+<h3>场景1：用户上下文传递</h3>
+<p>Web应用中，把当前登录用户信息存在ThreadLocal里，在当前请求的整个调用链中随时可以取到，不用层层传递参数。</p>
+
+<pre>
+public class UserContext {
+    private static ThreadLocal&lt;User&gt; userHolder = new ThreadLocal&lt;&gt;();
+
+    public static void setUser(User user) {
+        userHolder.set(user);
+    }
+    public static User getUser() {
+        return userHolder.get();
+    }
+    public static void clear() {
+        userHolder.remove();
+    }
+}
+</pre>
+
+<p>拦截器里set，Controller/Service里get，拦截器的afterCompletion里remove。</p>
+
+<h3>场景2：数据库连接管理</h3>
+<p>保证同一个线程用同一个数据库连接，事务操作时同一个连接才能保证事务一致性。</p>
+
+<h3>场景3：SimpleDateFormat线程安全</h3>
+<p>SimpleDateFormat不是线程安全的，多线程共享会出问题。可以每个线程存一个自己的SimpleDateFormat。</p>
+<p>不过JDK8之后推荐用DateTimeFormatter，它是线程安全的，不需要ThreadLocal。</p>
+
+<h2>六、为什么需要ThreadLocal</h2>
+
+<h3>问题1：共享变量线程安全</h3>
+<p>多线程共享一个变量，需要加锁保证安全，加锁影响性能，还容易死锁。</p>
+<p>ThreadLocal的解决方案：不给共享了，每人一份，天然线程安全，不用加锁，性能好。</p>
+
+<h3>问题2：参数层层传递太麻烦</h3>
+<p>用户信息、请求上下文这些数据，从Controller到Service到Dao，每层方法都要传参数，方法签名又长又丑。</p>
+<p>ThreadLocal的解决方案：存在当前线程里，随时取，不用传参，<b>隐式传参</b>。</p>
+
+<h3>问题3：线程安全的工具类</p>
+<p>有些工具类（如SimpleDateFormat）不是线程安全的，要么每次new一个（浪费性能），要么加锁（影响性能）。</p>
+<p>ThreadLocal的解决方案：每个线程一个，既线程安全，又不用频繁创建对象。</p>
+
+<h2>知识点总结</h2>
+
+<p>1. ThreadLocal=员工储物柜，每个线程一份，互不干扰，天然线程安全。</p>
+<p>2. 四个核心方法：set、get、remove、withInitial。</p>
+<p>3. 数据存在Thread对象的ThreadLocalMap里，不是存在ThreadLocal里。</p>
+<p>4. ThreadLocalMap的key是弱引用，value是强引用。</p>
+<p>5. 内存泄漏：key被GC回收了（变null），value还被Thread强引用，回收不了。</p>
+<p>6. 根本解法：用完在finally里调用remove()，线程池场景尤其要注意。</p>
+<p>7. 典型应用：用户上下文、数据库连接、非线程安全工具类。</p>
+<p>8. ThreadLocal是线程隔离，不是线程共享，别搞反了。</p>
+
+</body>
+</html>

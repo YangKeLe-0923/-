@@ -1,0 +1,195 @@
+<html xmlns:v="urn:schemas-microsoft-com:vml"
+xmlns:o="urn:schemas-microsoft-com:office:office"
+xmlns:w="urn:schemas-microsoft-com:office:word"
+xmlns:m="http://schemas.microsoft.com/office/2004/12/omml"
+xmlns="http://www.w3.org/TR/REC-html40">
+
+<head>
+<meta http-equiv=Content-Type content="text/html; charset=utf-8">
+<meta name=ProgId content=Word.Document>
+<style>
+body { font-family: "微软雅黑", "Microsoft YaHei", "SimSun", Arial; font-size: 11pt; line-height: 1.8; color: #333333; }
+h1 { font-size: 18pt; font-weight: bold; font-family: "微软雅黑", "Microsoft YaHei", SimHei; text-align: center;
+     border-bottom: 2.25pt solid #2C3E50; padding-bottom: 6pt; }
+h2 { font-size: 14pt; font-weight: bold; font-family: "微软雅黑", "Microsoft YaHei", SimHei;
+     border-bottom: 1.0pt solid #BDC3C7; padding-bottom: 3pt; margin-top: 20pt; }
+h3 { font-size: 12pt; font-weight: bold; font-family: "微软雅黑", "Microsoft YaHei", SimHei; margin-top: 16pt; }
+code { font-family: Consolas, "Courier New"; background: #f5f5f5; padding: 1px 3px; font-size: 10pt; }
+pre { font-family: Consolas, "Courier New"; background: #f8f8f8; padding: 10pt;
+      border: 1px solid #ddd; font-size: 10pt; white-space: pre-wrap; line-height: 1.5; }
+ul { margin-top: 6pt; margin-bottom: 6pt; }
+li { margin-bottom: 3pt; }
+.tag1 { display: inline-block; background: #E8F4F8; padding: 2px 8px; border-radius: 3px;
+       font-size: 9pt; color: #2C3E50; margin-right: 6pt; }
+</style>
+</head>
+<body>
+
+<h1>阻塞队列核心知识速览</h1>
+
+<h2>一、什么是阻塞队列</h2>
+
+<p><span class="tag1">定义</span> <b>阻塞队列 = BlockingQueue</b>，是支持阻塞式插入和移除操作的队列。当队列满时，插入元素的线程会阻塞等待；当队列空时，获取元素的线程会阻塞等待。</p>
+<p>它本质上就是一个<b>"快递驿站"</b>——有固定的货架容量，快递员送货满了就得等着，用户取件空了也得等着，有位置/有快递了再操作。</p>
+<p>打个比方：阻塞队列就像快递驿站</p>
+
+<ul>
+<li>生产者（快递员）往队列里放快递，满了就阻塞等空位</li>
+<li>消费者（取件人）从队列里取快递，空了就阻塞等快递</li>
+<li>队列本身是线程安全的，多线程同时存取不会出问题</li>
+</ul>
+
+<h2>二、四组核心操作</h2>
+
+<p>BlockingQueue提供了四组不同行为的操作方法，适用于不同场景：</p>
+
+<h3>1. 抛异常（不推荐）</h3>
+
+<ul>
+<li><code>add(e)</code> —— 队满抛 IllegalStateException</li>
+<li><code>remove()</code> —— 队空抛 NoSuchElementException</li>
+<li><code>element()</code> —— 看队头，空了抛异常</li>
+</ul>
+
+<p>用得少，因为异常处理麻烦。</p>
+
+<h3>2. 返回特殊值（常用）</h3>
+
+<ul>
+<li><code>offer(e)</code> —— 成功返回true，满了返回false</li>
+<li><code>poll()</code> —— 成功返回元素，空了返回null</li>
+<li><code>peek()</code> —— 看队头，空了返回null</li>
+</ul>
+
+<p>非阻塞，调用完立刻返回，适合不想等的场景。</p>
+
+<h3>3. 阻塞等待（最常用）</h3>
+
+<ul>
+<li><code>put(e)</code> —— 满了一直阻塞，直到有空位</li>
+<li><code>take()</code> —— 空了一直阻塞，直到有元素</li>
+</ul>
+
+<p>生产者消费者模式的经典用法，满了就等，空了就等，不用自己写等待逻辑。</p>
+
+<h3>4. 超时等待</h3>
+
+<ul>
+<li><code>offer(e, time, unit)</code> —— 等一段时间，超时还满就返回false</li>
+<li><code>poll(time, unit)</code> —— 等一段时间，超时还空就返回null</li>
+</ul>
+
+<p>最灵活的方式，等一会儿不行就放弃，避免无限等待。</p>
+
+<h2>三、两大经典实现</h2>
+
+<h3>ArrayBlockingQueue</h3>
+<p>基于数组实现的有界阻塞队列，创建时必须指定容量。</p>
+
+<ul>
+<li><b>一把锁</b>：读写用同一把ReentrantLock，读写不分离</li>
+<li><b>两个条件</b>：notEmpty（非空条件，取的时候等）、notFull（非满条件，放的时候等）</li>
+<li><b>环形数组</b>：用takeIndex和putIndex两个指针循环使用数组空间</li>
+</ul>
+
+<p>优点：数组连续内存，缓存友好，性能稳定。缺点：读写共用一把锁，并发度不如LinkedBlockingQueue。</p>
+
+<h3>LinkedBlockingQueue</h3>
+<p>基于链表实现的阻塞队列，默认容量是 Integer.MAX_VALUE（相当于无界，<b>慎用</b>）。</p>
+
+<ul>
+<li><b>两把锁</b>：takeLock（读锁）和 putLock（写锁），读写分离</li>
+<li><b>两个条件</b>：notEmpty和notFull，分别在两把锁上</li>
+<li><b>AtomicInteger计数</b>：用原子整数count记录元素个数</li>
+</ul>
+
+<p>优点：两把锁读写分离，并发度更高，高并发下性能更好。缺点：链表节点内存不连续，缓存不友好；默认无界，生产太快可能OOM。</p>
+
+<p><b>重要提醒</b>：用LinkedBlockingQueue一定要手动指定容量，别用默认构造方法，不然就是个无界队列，容易内存溢出。</p>
+
+<h2>四、其他实现类</h2>
+
+<h3>PriorityBlockingQueue</h3>
+<p>优先级阻塞队列，元素按优先级出队，不是先进先出。元素需要实现Comparable接口或传入Comparator。</p>
+<p>无界队列，底层是数组实现的二叉堆。</p>
+
+<h3>DelayQueue</h3>
+<p>延迟队列，只有到期的元素才能出队。元素需要实现Delayed接口，返回剩余延迟时间。</p>
+<p>应用场景：定时任务、缓存过期、订单超时取消等。</p>
+
+<h3>SynchronousQueue</h3>
+<p>同步队列，不存储元素，容量为0。插入必须等另一个线程来取，取必须等另一个线程来放。</p>
+<p>就是直接交接，不经过队列存储。Executors.newCachedThreadPool()用的就是它。</p>
+
+<h3>LinkedTransferQueue</h3>
+<p>继承自TransferQueue，比SynchronousQueue功能更强，支持transfer()方法——把元素直接传给消费者，如果没有消费者就等。</p>
+
+<h2>五、生产者消费者模式</h2>
+
+<p>阻塞队列最经典的应用就是生产者消费者模式。用阻塞队列实现，不用自己写wait/notify，代码简洁又安全。</p>
+
+<pre>
+public class ProducerConsumer {
+    public static void main(String[] args) {
+        BlockingQueue&lt;Integer&gt; queue = new ArrayBlockingQueue&lt;&gt;(10);
+
+        // 3个生产者
+        for (int i = 0; i &lt; 3; i++) {
+            new Thread(() -&gt; {
+                int num = 0;
+                while (true) {
+                    try {
+                        queue.put(num++);       // 满了就等
+                        System.out.println(Thread.currentThread().getName()
+                            + " 生产了：" + num);
+                    } catch (InterruptedException e) {
+                        e.printStackTrace();
+                    }
+                }
+            }).start();
+        }
+
+        // 2个消费者
+        for (int i = 0; i &lt; 2; i++) {
+            new Thread(() -&gt; {
+                while (true) {
+                    try {
+                        Integer val = queue.take();  // 空了就等
+                        System.out.println(Thread.currentThread().getName()
+                            + " 消费了：" + val);
+                    } catch (InterruptedException e) {
+                        e.printStackTrace();
+                    }
+                }
+            }).start();
+        }
+    }
+}
+</pre>
+
+<h2>六、为什么需要阻塞队列</h2>
+
+<h3>问题1：生产者消费者速率不匹配</h3>
+<p>生产者生产快，消费者消费慢，或者反过来。没有缓冲区的话，快的一方必须等慢的一方，资源利用率低。</p>
+<p>阻塞队列的解决方案：队列作为缓冲区，生产者只管放，消费者只管取，速率不匹配时队列起缓冲作用，<b>解耦生产者和消费者</b>。</p>
+
+<h3>问题2：手写wait/notify容易出错</h3>
+<p>不用阻塞队列的话，生产者消费者模式需要自己写synchronized+wait+notify，很容易写错（比如忘记notifyAll、虚假唤醒等）。</p>
+<p>阻塞队列的解决方案：把等待/通知逻辑封装在队列内部，<b>使用者不用关心线程同步</b>，调用put/take就行，简单安全。</p>
+
+<h3>问题3：线程池需要任务队列</h3>
+<p>线程池中提交任务的速率和执行任务的速率不一定匹配，需要一个队列来暂存待执行的任务。</p>
+<p>ThreadPoolExecutor的workQueue就是BlockingQueue，线程池的很多特性（有界/无界、拒绝策略等）都和阻塞队列有关。</p>
+
+<h2>知识点总结</h2>
+
+<p>1. 阻塞队列=快递驿站，满了放不进去等，空了取不出来等。</p>
+<p>2. 四组操作：抛异常、返回特殊值、阻塞、超时，按需选用。</p>
+<p>3. ArrayBlockingQueue=数组+有界+一把锁，LinkedBlockingQueue=链表+两把锁+读写分离。</p>
+<p>4. LinkedBlockingQueue默认无界，一定要手动指定容量，防止OOM。</p>
+<p>5. 其他实现：PriorityBlockingQueue（优先级）、DelayQueue（延迟）、SynchronousQueue（直接交接）。</p>
+<p>6. 经典应用：生产者消费者模式，不用自己写wait/notify。</p>
+<p>7. 线程池的任务队列用的就是BlockingQueue。</p>
+
+</body>
+</html>

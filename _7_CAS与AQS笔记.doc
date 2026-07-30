@@ -1,0 +1,186 @@
+<html xmlns:v="urn:schemas-microsoft-com:vml"
+xmlns:o="urn:schemas-microsoft-com:office:office"
+xmlns:w="urn:schemas-microsoft-com:office:word"
+xmlns:m="http://schemas.microsoft.com/office/2004/12/omml"
+xmlns="http://www.w3.org/TR/REC-html40">
+
+<head>
+<meta http-equiv=Content-Type content="text/html; charset=utf-8">
+<meta name=ProgId content=Word.Document>
+<style>
+body { font-family: "微软雅黑", "Microsoft YaHei", "SimSun", Arial; font-size: 11pt; line-height: 1.8; color: #333333; }
+h1 { font-size: 18pt; font-weight: bold; font-family: "微软雅黑", "Microsoft YaHei", SimHei; text-align: center;
+     border-bottom: 2.25pt solid #2C3E50; padding-bottom: 6pt; }
+h2 { font-size: 14pt; font-weight: bold; font-family: "微软雅黑", "Microsoft YaHei", SimHei;
+     border-bottom: 1.0pt solid #BDC3C7; padding-bottom: 3pt; margin-top: 20pt; }
+h3 { font-size: 12pt; font-weight: bold; font-family: "微软雅黑", "Microsoft YaHei", SimHei; margin-top: 16pt; }
+code { font-family: Consolas, "Courier New"; background: #f5f5f5; padding: 1px 3px; font-size: 10pt; }
+pre { font-family: Consolas, "Courier New"; background: #f8f8f8; padding: 10pt;
+      border: 1px solid #ddd; font-size: 10pt; white-space: pre-wrap; line-height: 1.5; }
+ul { margin-top: 6pt; margin-bottom: 6pt; }
+li { margin-bottom: 3pt; }
+.tag1 { display: inline-block; background: #E8F4F8; padding: 2px 8px; border-radius: 3px;
+       font-size: 9pt; color: #2C3E50; margin-right: 6pt; }
+</style>
+</head>
+<body>
+
+<h1>CAS与AQS核心知识速览</h1>
+
+<h2>一、CAS是什么</h2>
+
+<p><span class="tag1">定义</span> <b>CAS = Compare And Swap（比较并交换）</b>，是一种无锁原子操作，用于实现多线程环境下的变量更新。</p>
+<p>它本质上就是一种<b>"乐观锁"</b>——假设没有冲突，先去改，改的时候发现被别人改过了就重试，直到成功为止。</p>
+<p>打个比方：CAS就像超市换货</p>
+
+<ul>
+<li>你拿了一瓶旧饮料（旧值），想去换一瓶新的（新值）</li>
+<li>到了柜台，先看货架上是不是还是你那瓶旧饮料（比较）</li>
+<li>如果还是旧的，直接换成新的（交换），成功</li>
+<li>如果已经被别人换成别的了，就再等下一次机会，重新来</li>
+</ul>
+
+<h3>CAS三要素</h3>
+
+<ul>
+<li><b>V</b>：要更新的变量（内存地址）</li>
+<li><b>A</b>：预期的旧值（期望V现在等于A）</li>
+<li><b>B</b>：要设置的新值</li>
+</ul>
+
+<p>操作逻辑：如果 V == A，就把 V 设为 B，返回成功；否则什么都不做，返回失败。整个操作是<b>原子的</b>，由CPU指令保证。</p>
+
+<h2>二、原子类（Atomic系列）</h2>
+
+<h3>是什么</h3>
+<p>J.U.C（java.util.concurrent）包下的一系列原子操作类，底层都是用CAS实现的，用来解决多线程下的计数等问题，比synchronized更轻量。</p>
+<p>常用原子类：</p>
+
+<ul>
+<li><code>AtomicInteger</code> —— 原子整数，最常用</li>
+<li><code>AtomicLong</code> —— 原子长整数</li>
+<li><code>AtomicBoolean</code> —— 原子布尔值</li>
+<li><code>AtomicReference</code> —— 原子引用（原子更新对象）</li>
+<li><code>AtomicIntegerArray</code> —— 原子数组</li>
+</ul>
+
+<h3>代码示例：AtomicInteger计数器</h3>
+
+<pre>
+public class AtomicDemo {
+    // 原子整数，初始值0
+    private static AtomicInteger count = new AtomicInteger(0);
+
+    public static void main(String[] args) throws InterruptedException {
+        for (int i = 0; i < 10; i++) {
+            new Thread(() -> {
+                for (int j = 0; j < 1000; j++) {
+                    count.incrementAndGet();  // 原子自增，不会丢数
+                }
+            }).start();
+        }
+        Thread.sleep(2000);
+        System.out.println("最终结果：" + count.get());  // 一定是10000
+    }
+}
+</pre>
+
+<p>换成普通int加volatile，结果会小于10000，因为i++不是原子的。用AtomicInteger就没问题，底层CAS保证。</p>
+
+<h3>ABA问题</h3>
+<p>CAS有个经典问题：变量从A变成B，又变回A。CAS检查的时候发现还是A，就以为没变过，但实际上中间已经变过了。</p>
+<p>大部分场景ABA不影响，但某些场景（比如链表操作）会出问题。</p>
+<p><b>解法</b>：加版本号。用 <code>AtomicStampedReference</code>，每次修改版本号+1，比较的时候连版本号一起比。</p>
+
+<h2>三、AQS是什么</h2>
+
+<p><span class="tag1">定义</span> <b>AQS = AbstractQueuedSynchronizer（抽象队列同步器）</b>，是J.U.C中几乎所有锁和同步工具的基础框架。</p>
+<p>它本质上就是一个<b>"排队叫号机"</b>——线程来了先试试能不能拿到锁，拿不到就领个号排队等着，锁释放了叫下一个号。</p>
+<p>打个比方：AQS就像银行叫号系统</p>
+
+<ul>
+<li>同步状态（state）= 窗口空闲状态，0表示没人用，大于0表示有人在用</li>
+<li>CLH队列 = 等候区，抢不到锁的线程排在这里</li>
+<li>每个排队的线程是一个Node节点，记录着线程信息和等待状态</li>
+<li>锁释放时，叫醒队列里的第一个人（队头）去抢锁</li>
+</ul>
+
+<h3>AQS的核心思想</h3>
+
+<ul>
+<li><b>state变量</b>：用一个volatile int变量表示同步状态，0=空闲，>0=已占用</li>
+<li><b>CAS改state</b>：用CAS方式修改state，成功就是抢到锁了</li>
+<li><b>CLH队列</b>：抢不到锁的线程打包成Node节点，加入队列尾部，然后挂起（park）</li>
+<li><b>唤醒机制</b>：释放锁时，把state改回0，然后叫醒队列里的下一个线程（unpark）</li>
+</ul>
+
+<h2>四、AQS的两种模式</h2>
+
+<h3>独占模式（Exclusive）</h3>
+<p>同一时间只能有一个线程持有锁。典型代表：ReentrantLock、synchronized。</p>
+<p>就像卫生间，一次只能进一个人。</p>
+
+<h3>共享模式（Share）</h3>
+<p>同一时间可以有多个线程持有锁，有个数量上限。典型代表：Semaphore、CountDownLatch、ReadWriteLock的读锁。</p>
+<p>就像停车场，有N个车位，来一辆车state减1，车位满了就等，走一辆state加1。</p>
+
+<h3>自定义同步器需要实现的方法</h3>
+<p>AQS是个抽象类，子类需要实现以下方法（AQS把模板都写好了，你只需要填核心逻辑）：</p>
+
+<ul>
+<li><code>tryAcquire(int)</code> —— 独占方式尝试获取锁</li>
+<li><code>tryRelease(int)</code> —— 独占方式尝试释放锁</li>
+<li><code>tryAcquireShared(int)</code> —— 共享方式尝试获取</li>
+<li><code>tryReleaseShared(int)</code> —— 共享方式尝试释放</li>
+<li><code>isHeldExclusively()</code> —— 判断是否是当前线程持有锁</li>
+</ul>
+
+<p>你不用管排队、挂起、唤醒这些复杂逻辑，AQS都帮你做了。你只要告诉它"什么叫抢到了锁、什么叫释放了锁"就行。</p>
+
+<h2>五、AQS常见实现类</h2>
+
+<h3>ReentrantLock（可重入锁）</h3>
+<p>独占模式的实现。state表示锁被持有次数，同一个线程多次获取就累加，释放就递减，减到0才真正释放。</p>
+<p>支持公平锁和非公平锁：非公平锁上来就先CAS抢一下，抢不到再排队；公平锁老老实实排队。</p>
+
+<h3>Semaphore（信号量）</h3>
+<p>共享模式的实现。state表示许可数量，acquire()减1，release()加1，减到0就阻塞。</p>
+<p>用来控制同时访问资源的线程数量，比如限流。</p>
+
+<h3>CountDownLatch（倒计时门闩）</h3>
+<p>共享模式的实现。state表示剩余计数，countDown()减1，await()等待state变成0。</p>
+<p>一个线程等多个线程都干完了再继续。</p>
+
+<h3>CyclicBarrier（循环栅栏）</h3>
+<p>和CountDownLatch类似，但可以重复使用。所有线程到齐了再一起出发。</p>
+
+<h3>ReentrantReadWriteLock（读写锁）</h3>
+<p>读锁共享、写锁独占。读读不互斥，读写/写写互斥。读多写少场景性能好。</p>
+
+<h2>六、为什么需要CAS和AQS</h2>
+
+<h3>问题1：synchronized太重了</h3>
+<p>synchronized早期是重量级锁，抢不到就阻塞，阻塞就要操作系统切换线程上下文，开销很大。</p>
+<p>CAS的解决方案：用CPU指令保证原子性，抢不到就自旋重试（忙等），不用阻塞线程，<b>用户态就能搞定</b>，性能好很多。</p>
+
+<h3>问题2：各种锁重复造轮子</h3>
+<p>没有AQS的话，每个同步工具都要自己实现"抢锁、排队、挂起、唤醒"这一套逻辑，代码重复，还容易写错。</p>
+<p>AQS的解决方案：把排队、挂起、唤醒这些通用逻辑封装成模板，子类只需要填最核心的"什么是获取、什么是释放"，<b>大大减少重复代码</b>。</p>
+
+<h3>问题3：synchronized功能太单一</h3>
+<p>synchronized只有独占锁一种模式，不支持公平锁、不支持超时、不支持中断、不支持共享模式。</p>
+<p>AQS的解决方案：基于AQS可以实现各种同步工具——可重入锁、信号量、倒计时、读写锁、栅栏等等，功能丰富得多。</p>
+
+<h2>知识点总结</h2>
+
+<p>1. CAS=比较并交换，乐观锁，CPU指令保证原子性，无锁但线程安全。</p>
+<p>2. CAS三要素：内存值V、预期旧值A、新值B，V==A才把V改成B。</p>
+<p>3. 原子类（AtomicInteger等）底层都是CAS，解决计数等场景的线程安全。</p>
+<p>4. CAS有ABA问题，加版本号（AtomicStampedReference）可以解决。</p>
+<p>5. AQS=抽象队列同步器，是J.U.C锁和同步工具的基础框架。</p>
+<p>6. AQS就像排队叫号机：抢不到锁就进CLH队列排队，等前面的人释放了再叫你。</p>
+<p>7. AQS两种模式：独占（ReentrantLock）、共享（Semaphore/CountDownLatch）。</p>
+<p>8. AQS是模板方法模式，子类只需要实现tryAcquire/tryRelease等几个核心方法。</p>
+
+</body>
+</html>

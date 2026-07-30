@@ -1,0 +1,235 @@
+<html xmlns:v="urn:schemas-microsoft-com:vml"
+xmlns:o="urn:schemas-microsoft-com:office:office"
+xmlns:w="urn:schemas-microsoft-com:office:word"
+xmlns:m="http://schemas.microsoft.com/office/2004/12/omml"
+xmlns="http://www.w3.org/TR/REC-html40">
+
+<head>
+<meta http-equiv=Content-Type content="text/html; charset=utf-8">
+<meta name=ProgId content=Word.Document>
+<style>
+body { font-family: "微软雅黑", "Microsoft YaHei", "SimSun", Arial; font-size: 11pt; line-height: 1.8; color: #333333; }
+h1 { font-size: 18pt; font-weight: bold; font-family: "微软雅黑", "Microsoft YaHei", SimHei; text-align: center;
+     border-bottom: 2.25pt solid #2C3E50; padding-bottom: 6pt; }
+h2 { font-size: 14pt; font-weight: bold; font-family: "微软雅黑", "Microsoft YaHei", SimHei;
+     border-bottom: 1.0pt solid #BDC3C7; padding-bottom: 3pt; margin-top: 20pt; }
+h3 { font-size: 12pt; font-weight: bold; font-family: "微软雅黑", "Microsoft YaHei", SimHei; margin-top: 16pt; }
+code { font-family: Consolas, "Courier New"; background: #f5f5f5; padding: 1px 3px; font-size: 10pt; }
+pre { font-family: Consolas, "Courier New"; background: #f8f8f8; padding: 10pt;
+      border: 1px solid #ddd; font-size: 10pt; white-space: pre-wrap; line-height: 1.5; }
+ul { margin-top: 6pt; margin-bottom: 6pt; }
+li { margin-bottom: 3pt; }
+.tag1 { display: inline-block; background: #E8F4F8; padding: 2px 8px; border-radius: 3px;
+       font-size: 9pt; color: #2C3E50; margin-right: 6pt; }
+</style>
+</head>
+<body>
+
+<h1>BOM依赖版本管理原理笔记</h1>
+
+<h2>一、什么是BOM</h2>
+
+<p><span class="tag1">定义</span> <b>BOM = Bill of Materials（物料清单）</b>，是Maven中一种专门用来统一管理依赖版本的机制。</p>
+<p>它本质上就是一张<b>"版本价格表"</b>，<b>只声明版本号，不真正引入依赖</b>。</p>
+<p>打个比方：BOM就像超市的价目表</p>
+
+<ul>
+<li>价目表上写："可口可乐3元、雪碧3元、矿泉水2元"——只是登记价格</li>
+<li>你光看价目表<b>不会真的买到饮料</b>，只是知道了每样东西的价格</li>
+<li>等你到货架拿饮料时（写 <code>&lt;dependency&gt;</code>），系统自动查价目表填上价格（ <code>&lt;version&gt;</code> ）</li>
+</ul>
+
+<h2>二、核心机制</h2>
+
+<h3>机制1：dependencyManagement —— 只声明，不引入</h3>
+<p><code>&lt;dependencyManagement&gt;</code> 是BOM的核心标签，它的作用是"登记版本号"，而不是真正下载依赖。</p>
+<p>在父POM或BOM中声明版本后，子模块写依赖时<b>不用写版本号</b>，Maven自动从父级查表填版本。</p>
+
+<pre>
+&lt;!-- 在父pom或BOM中 --&gt;
+&lt;dependencyManagement&gt;
+    &lt;dependencies&gt;
+        &lt;dependency&gt;
+            &lt;groupId&gt;com.alibaba&lt;/groupId&gt;
+            &lt;artifactId&gt;druid&lt;/artifactId&gt;
+            &lt;version&gt;1.2.28&lt;/version&gt;  &lt;!-- 只记版本，不真下载 --&gt;
+        &lt;/dependency&gt;
+    &lt;/dependencies&gt;
+&lt;/dependencyManagement&gt;
+</pre>
+
+<pre>
+&lt;!-- 在子模块中 --&gt;
+&lt;dependency&gt;
+    &lt;groupId&gt;com.alibaba&lt;/groupId&gt;
+    &lt;artifactId&gt;druid&lt;/artifactId&gt;
+    &lt;!-- 不写version！Maven自动找到1.2.28 --&gt;
+&lt;/dependency&gt;
+</pre>
+
+<h3>机制2：scope=import —— 引入别人的BOM</h3>
+<p><code>&lt;scope&gt;import&lt;/scope&gt;</code> 是BOM的灵魂，它的作用是把别人的BOM整张表"复制粘贴"到自己的 <code>dependencyManagement</code> 里。</p>
+<p>最常见的用法就是引入Spring Boot官方BOM，自动继承它管理的几百个依赖版本。</p>
+
+<pre>
+&lt;dependencyManagement&gt;
+    &lt;dependencies&gt;
+        &lt;dependency&gt;
+            &lt;groupId&gt;org.springframework.boot&lt;/groupId&gt;
+            &lt;artifactId&gt;spring-boot-dependencies&lt;/artifactId&gt;
+            &lt;version&gt;2.7.18&lt;/version&gt;
+            &lt;type&gt;pom&lt;/type&gt;           &lt;!-- 注意type=pom --&gt;
+            &lt;scope&gt;import&lt;/scope&gt;      &lt;!-- 关键：import进来 --&gt;
+        &lt;/dependency&gt;
+    &lt;/dependencies&gt;
+&lt;/dependencyManagement&gt;
+</pre>
+
+<p><b>效果</b>：把Spring Boot官方BOM的整张版本表复制到自己的dependencyManagement里，所有Spring相关依赖不用写版本号。</p>
+
+<h2>三、BOM制作步骤</h2>
+
+<h3>第1步：声明自己是BOM</h3>
+<p>BOM本质是一个pom类型的项目，不含代码，只存版本信息。</p>
+
+<pre>
+&lt;artifactId&gt;yudao-dependencies&lt;/artifactId&gt;
+&lt;packaging&gt;pom&lt;/packaging&gt;  &lt;!-- pom类型，不是jar，不含代码 --&gt;
+</pre>
+
+<h3>第2步：properties集中定义版本号</h3>
+<p>所有版本号统一放在 <code>&lt;properties&gt;</code> 里，方便统一修改。</p>
+
+<pre>
+&lt;properties&gt;
+    &lt;spring.boot.version&gt;2.7.18&lt;/spring.boot.version&gt;
+    &lt;mybatis-plus.version&gt;3.5.16&lt;/mybatis-plus.version&gt;
+    &lt;redisson.version&gt;4.6.1&lt;/redisson.version&gt;
+    &lt;hutool-5.version&gt;5.8.46&lt;/hutool-5.version&gt;
+    &lt;!-- 80+个版本号集中管理 --&gt;
+&lt;/properties&gt;
+</pre>
+
+<h3>第3步：dependencyManagement里"造表"</h3>
+<p>分两部分：先import别人的BOM（站在巨人肩膀上），再声明自己的依赖版本（补充或覆盖）。</p>
+
+<p><b>Part A</b>：import别人的BOM，继承第三方版本管理</p>
+<pre>
+&lt;!-- 引入Spring Boot官方BOM：自动管理Spring全家桶版本 --&gt;
+&lt;dependency&gt;
+    &lt;groupId&gt;org.springframework.boot&lt;/groupId&gt;
+    &lt;artifactId&gt;spring-boot-dependencies&lt;/artifactId&gt;
+    &lt;version&gt;${spring.boot.version}&lt;/version&gt;
+    &lt;type&gt;pom&lt;/type&gt;
+    &lt;scope&gt;import&lt;/scope&gt;
+&lt;/dependency&gt;
+</pre>
+
+<p><b>Part B</b>：自己声明第三方依赖版本（覆盖或补充）</p>
+<pre>
+&lt;dependency&gt;
+    &lt;groupId&gt;com.baomidou&lt;/groupId&gt;
+    &lt;artifactId&gt;mybatis-plus-boot-starter&lt;/artifactId&gt;
+    &lt;version&gt;${mybatis-plus.version}&lt;/version&gt;  &lt;!-- 3.5.16 --&gt;
+&lt;/dependency&gt;
+&lt;dependency&gt;
+    &lt;groupId&gt;org.redisson&lt;/groupId&gt;
+    &lt;artifactId&gt;redisson-spring-boot-starter&lt;/artifactId&gt;
+    &lt;version&gt;${redisson.version}&lt;/version&gt;
+&lt;/dependency&gt;
+</pre>
+
+<h3>第4步：根pom把BOM引入项目</h3>
+<p>在项目的根pom.xml中，用 <code>scope=import</code> 把BOM的整张版本表导入进来。</p>
+
+<pre>
+&lt;dependencyManagement&gt;
+    &lt;dependencies&gt;
+        &lt;dependency&gt;
+            &lt;groupId&gt;cn.iocoder.boot&lt;/groupId&gt;
+            &lt;artifactId&gt;yudao-dependencies&lt;/artifactId&gt;
+            &lt;version&gt;${revision}&lt;/version&gt;
+            &lt;type&gt;pom&lt;/type&gt;
+            &lt;scope&gt;import&lt;/scope&gt;  &lt;!-- 把整张版本表导入根pom --&gt;
+        &lt;/dependency&gt;
+    &lt;/dependencies&gt;
+&lt;/dependencyManagement&gt;
+</pre>
+
+<h3>第5步：子模块用依赖时不写版本号</h3>
+<p>子模块直接写依赖，不用管版本号，全部由BOM统一管理。</p>
+
+<pre>
+&lt;dependency&gt;
+    &lt;groupId&gt;cn.iocoder.boot&lt;/groupId&gt;
+    &lt;artifactId&gt;yudao-spring-boot-starter-biz-data-permission&lt;/artifactId&gt;
+    &lt;!-- 没有version！由yudao-dependencies的表决定 --&gt;
+&lt;/dependency&gt;
+</pre>
+
+<h2>四、版本统一传递链路</h2>
+
+<p>BOM的版本传递是一条清晰的链路，从源头到使用方层层传递：</p>
+
+<pre>
+BOM项目（yudao-dependencies）
+    │
+    ├── properties 定义版本变量（版本源头）
+    │   └── mybatis-plus.version = 3.5.16
+    │
+    ├── dependencyManagement 造版本表
+    │   └── mybatis-plus → ${mybatis-plus.version}
+    │
+    ↓ scope=import 导入
+    │
+根 pom.xml
+    │
+    ├── dependencyManagement 继承BOM的表
+    │
+    ↓ 传递给子模块
+    │
+子模块 pom.xml
+    └── 写dependency，不写version，自动用BOM里的版本
+</pre>
+
+<p>整条链路的核心是：<b>版本只在一个地方定义（BOM的properties），所有地方都引用它</b>。升级版本时只改一个地方，全局生效。</p>
+
+<h2>五、关键技巧与坑点</h2>
+
+<h3>技巧1：import顺序决定优先级</h3>
+<p>多个BOM都声明了同一个依赖的版本时，<b>先声明的优先级高</b>。后面的BOM不会覆盖前面的。</p>
+<p>所以通常把Spring Boot官方BOM放在最前面，自己的自定义版本放在后面——想覆盖谁就把谁放在前面。</p>
+
+<h3>技巧2：exclusions也能在BOM里统一排除</h3>
+<p>BOM里不仅能声明版本，还能统一排除传递依赖。比如某个依赖自带的log4j和项目冲突，可以在BOM里统一排除掉，子模块不用每个都写exclusion。</p>
+
+<h3>坑点1：BOM不引入依赖，只管理版本</h3>
+<p><b>现象</b>：在BOM里声明了一个依赖，子模块里还是找不到类。</p>
+<p><b>原因</b>：BOM里的dependencyManagement只是"登记版本"，不会真的把依赖加进来。</p>
+<p><b>解法</b>：子模块必须自己在 <code>&lt;dependencies&gt;</code>（不是dependencyManagement）里声明依赖，只是不用写版本号。</p>
+
+<h3>坑点2：scope=import只能用在dependencyManagement里</h3>
+<p><b>现象</b>：在普通 <code>&lt;dependencies&gt;</code> 里写了 <code>scope=import</code>，不生效。</p>
+<p><b>原因</b>：import scope是dependencyManagement专属的，普通dependencies里用了会被忽略。</p>
+<p><b>解法</b>：import只能写在 <code>&lt;dependencyManagement&gt;</code> 标签内部。</p>
+
+<h3>坑点3：子模块写了版本号会覆盖BOM</h3>
+<p><b>现象</b>：BOM里声明了版本，但子模块里还是出现了版本冲突。</p>
+<p><b>原因</b>：子模块的dependency里如果自己写了 <code>&lt;version&gt;</code>，优先级高于BOM里的版本。</p>
+<p><b>解法</b>：使用BOM时，子模块尽量不要写版本号，全部交给BOM统一管理。</p>
+
+<h2>六、总结</h2>
+
+<ul>
+<li>BOM = 版本价格表，只声明版本不引入依赖，核心是 <code>dependencyManagement</code></li>
+<li><code>scope=import</code> 是BOM的灵魂，能把别人的整张版本表复制过来</li>
+<li>BOM是pom类型项目，不含代码，只存版本信息</li>
+<li>版本号集中在properties里定义，用 <code>${变量名}</code> 引用</li>
+<li>版本传递链路：BOM properties → BOM dependencyManagement → 根pom import → 子模块直接用</li>
+<li>多个BOM时先声明的优先级高，后面的不会覆盖前面的</li>
+<li>BOM不真正引入依赖，子模块还是要写dependency，只是不用写version</li>
+<li>import scope只能用在dependencyManagement里，普通dependencies里用了无效</li>
+</ul>
+
+</body>
+</html>
